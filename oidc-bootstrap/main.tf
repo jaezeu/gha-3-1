@@ -1,20 +1,51 @@
+
 data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
 
-module "github_oidc" {
-  source  = "terraform-module/github-oidc-provider/aws"
-  version = "~> 2.2.1"
+data "aws_iam_policy_document" "github_trust" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
 
-  create_oidc_provider = false
-  oidc_provider_arn    = data.aws_iam_openid_connect_provider.github.arn
-  create_oidc_role     = true
-  role_name = "jaz-31-oidc-role"
-  repositories              = ["jaezeu/gha-3-1"]
-  oidc_role_attach_policies = ["arn:aws:iam::aws:policy/AmazonS3FullAccess"]
+    principals {
+      type        = "Federated"
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository_username}*/${var.github_repository_name}*:*"]
+    }
+  }
 }
 
-output "oidc_role_arn" {
-  description = "GitHub role ARN"
-  value       = module.github_oidc.oidc_role
+resource "aws_iam_role" "github_oidc" {
+  name               = var.github_oidc_role_name
+  assume_role_policy = data.aws_iam_policy_document.github_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "s3_full" {
+  role       = aws_iam_role.github_oidc.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
+
+variable "github_repository_username" {
+  description = "GitHub repository username"
+  type        = string
+}
+
+variable "github_repository_name" {
+  description = "GitHub repository name"
+  type        = string
+}
+
+variable "github_oidc_role_name" {
+  description = "Name of the GitHub OIDC role"
+  type        = string
+}
+
+output "github_oidc_role_arn" {
+  value = aws_iam_role.github_oidc.arn
 }
